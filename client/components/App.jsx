@@ -2,46 +2,88 @@ import { useEffect, useRef, useState } from "react";
 import logo from "/assets/openai-logomark.svg";
 import EventLog from "./EventLog";
 import SessionControls from "./SessionControls";
-import ToolPanel from "./ToolPanel";
 
 export default function App() {
   const [isSessionActive, setIsSessionActive] = useState(false);
   const [events, setEvents] = useState([]);
   const [dataChannel, setDataChannel] = useState(null);
+  const [topic, setTopic] = useState("AI in healthcare"); //State variable for the Debate Topic drop down box
+  const [stance, setStance] = useState("for"); //State variable for the Stance drop down box
   const peerConnection = useRef(null);
   const audioElement = useRef(null);
+  const [aiResponse, setAiResponse] = useState(""); // Live transcript for AI
+
 
   async function startSession() {
-    // Get a session token for OpenAI Realtime API
     const tokenResponse = await fetch("/token");
     const data = await tokenResponse.json();
     const EPHEMERAL_KEY = data.client_secret.value;
-
-    // Create a peer connection
+  
     const pc = new RTCPeerConnection();
-
-    // Set up to play remote audio from the model
     audioElement.current = document.createElement("audio");
     audioElement.current.autoplay = true;
     pc.ontrack = (e) => (audioElement.current.srcObject = e.streams[0]);
-
-    // Add local audio track for microphone input in the browser
-    const ms = await navigator.mediaDevices.getUserMedia({
-      audio: true,
-    });
+  
+    const ms = await navigator.mediaDevices.getUserMedia({ audio: true });
     pc.addTrack(ms.getTracks()[0]);
-
-    // Set up data channel for sending and receiving events
+  
     const dc = pc.createDataChannel("oai-events");
-    setDataChannel(dc);
-
-    // Start the session using the Session Description Protocol (SDP)
+  
+    dc.addEventListener("open", () => {
+      setIsSessionActive(true);
+      setDataChannel(dc); // still keep state update for future use
+    
+      //Prompt for the AI
+      const introMessage = {
+        type: "conversation.item.create",
+        item: {
+          type: "message",
+          role: "user",
+          content: [
+            {
+              type: "input_text",
+              text: `Let's begin a debate on the topic: "${topic}". I will argue ${
+                stance === "for" ? "FOR" : "AGAINST"
+              } the motion. You must take the opposing view. Respond concisely (2-3 sentences).`,
+            },
+          ],
+        },
+      };
+    
+      setTimeout(() => {
+        sendClientEvent(introMessage, dc); // use local dc
+        // sendClientEvent({ type: "response.create" }, dc); // use local dc
+      }, 300);
+    });
+    
+  
+    dc.addEventListener("message", (e) => {
+      const event = JSON.parse(e.data);
+    
+      // Capture delta updates
+      if (event.type === "response.delta") {
+        const textDelta = event.delta?.content?.[0]?.text;
+        if (textDelta) {
+          setAiResponse(prev => prev + textDelta);
+        }
+      }
+    
+      // Clear after final response
+      if (event.type === "response.done") {
+        setAiResponse(""); // Reset for the next message
+      }
+    
+      if (!event.timestamp) {
+        event.timestamp = new Date().toLocaleTimeString();
+      }
+      setEvents((prev) => [event, ...prev]);
+    });
+    
+  
     const offer = await pc.createOffer();
     await pc.setLocalDescription(offer);
-
-    const baseUrl = "https://api.openai.com/v1/realtime";
-    const model = "gpt-4o-realtime-preview-2024-12-17";
-    const sdpResponse = await fetch(`${baseUrl}?model=${model}`, {
+  
+    const sdpResponse = await fetch(`https://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-12-17`, {
       method: "POST",
       body: offer.sdp,
       headers: {
@@ -49,133 +91,99 @@ export default function App() {
         "Content-Type": "application/sdp",
       },
     });
-
-    const answer = {
-      type: "answer",
-      sdp: await sdpResponse.text(),
-    };
+  
+    const answer = { type: "answer", sdp: await sdpResponse.text() };
     await pc.setRemoteDescription(answer);
-
+  
     peerConnection.current = pc;
   }
 
-  // Stop current session, clean up peer connection and data channel
   function stopSession() {
-    if (dataChannel) {
-      dataChannel.close();
-    }
-
-    peerConnection.current.getSenders().forEach((sender) => {
-      if (sender.track) {
-        sender.track.stop();
-      }
-    });
-
-    if (peerConnection.current) {
-      peerConnection.current.close();
-    }
-
+    if (dataChannel) dataChannel.close();
+    peerConnection.current?.getSenders().forEach((s) => s.track?.stop());
+    peerConnection.current?.close();
     setIsSessionActive(false);
     setDataChannel(null);
     peerConnection.current = null;
   }
 
-  // Send a message to the model
-  function sendClientEvent(message) {
-    if (dataChannel) {
+  function sendClientEvent(message, channelOverride = null) {
+    const channel = channelOverride || dataChannel;
+    if (channel) {
       const timestamp = new Date().toLocaleTimeString();
       message.event_id = message.event_id || crypto.randomUUID();
-
-      // send event before setting timestamp since the backend peer doesn't expect this field
-      dataChannel.send(JSON.stringify(message));
-
-      // if guard just in case the timestamp exists by miracle
-      if (!message.timestamp) {
-        message.timestamp = timestamp;
-      }
+      channel.send(JSON.stringify(message));
+      if (!message.timestamp) message.timestamp = timestamp;
       setEvents((prev) => [message, ...prev]);
     } else {
-      console.error(
-        "Failed to send message - no data channel available",
-        message,
-      );
+      console.error("Failed to send message - no data channel available", message);
     }
   }
+  
 
-  // Send a text message to the model
   function sendTextMessage(message) {
     const event = {
       type: "conversation.item.create",
       item: {
         type: "message",
         role: "user",
-        content: [
-          {
-            type: "input_text",
-            text: message,
-          },
-        ],
+        content: [{ type: "input_text", text: message }],
       },
     };
-
     sendClientEvent(event);
     sendClientEvent({ type: "response.create" });
   }
 
-  // Attach event listeners to the data channel when a new one is created
-  useEffect(() => {
-    if (dataChannel) {
-      // Append new server events to the list
-      dataChannel.addEventListener("message", (e) => {
-        const event = JSON.parse(e.data);
-        if (!event.timestamp) {
-          event.timestamp = new Date().toLocaleTimeString();
-        }
-
-        setEvents((prev) => [event, ...prev]);
-      });
-
-      // Set session active when the data channel is opened
-      dataChannel.addEventListener("open", () => {
-        setIsSessionActive(true);
-        setEvents([]);
-      });
-    }
-  }, [dataChannel]);
-
   return (
-    <>
-      <nav className="absolute top-0 left-0 right-0 h-16 flex items-center">
-        <div className="flex items-center gap-4 w-full m-4 pb-2 border-0 border-b border-solid border-gray-200">
-          <img style={{ width: "24px" }} src={logo} />
-          <h1>realtime console</h1>
+    <div className="bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900 text-white min-h-screen flex items-center justify-center p-4">
+      <div className="max-w-2xl w-full bg-gray-800 rounded-2xl shadow-2xl p-6 space-y-6">
+        <div className="text-center border-b border-gray-700 pb-4">
+          <h1 className="text-4xl font-extrabold text-white">AI Debator</h1>
         </div>
-      </nav>
-      <main className="absolute top-16 left-0 right-0 bottom-0">
-        <section className="absolute top-0 left-0 right-[380px] bottom-0 flex">
-          <section className="absolute top-0 left-0 right-0 bottom-32 px-4 overflow-y-auto">
-            <EventLog events={events} />
-          </section>
-          <section className="absolute h-32 left-0 right-0 bottom-0 p-4">
-            <SessionControls
-              startSession={startSession}
-              stopSession={stopSession}
-              sendClientEvent={sendClientEvent}
-              sendTextMessage={sendTextMessage}
-              events={events}
-              isSessionActive={isSessionActive}
-            />
-          </section>
-        </section>
-        <section className="absolute top-0 w-[380px] right-0 bottom-0 p-4 pt-0 overflow-y-auto">
-          <ToolPanel
+
+        <div className="space-y-4">
+          <div>
+            <label className="block text-sm text-gray-300 mb-1">Debate Topic</label>
+            <select
+              className="w-full rounded-md p-2 text-black"
+              value={topic}
+              onChange={(e) => setTopic(e.target.value)}
+            >
+              <option value="AI in healthcare">Allowing AI to override human decisions in healthcare will lead to better patient outcome</option>
+              <option value="Social media's impact on society">Social media's impact on society</option>
+              <option value="Climate change action urgency">Climate change action urgency</option>
+            </select>
+          </div>
+          <div>
+            <label className="block text-sm text-gray-300 mb-1">Your Stance</label>
+            <select
+              className="w-full rounded-md p-2 text-black"
+              value={stance}
+              onChange={(e) => setStance(e.target.value)}
+            >
+              <option value="for">For the motion</option>
+              <option value="against">Against the motion</option>
+            </select>
+          </div>
+        </div>
+
+        <div className="bg-gray-700 p-4 rounded-md min-h-[80px]">
+          <h2 className="text-lg font-semibold mb-2">AI Response:</h2>
+          <p className="text-white">{aiResponse || "Click start speaking"}</p>
+        </div>
+
+
+        <div className="pt-4">
+          <SessionControls
+            startSession={startSession}
+            stopSession={stopSession}
             sendClientEvent={sendClientEvent}
             sendTextMessage={sendTextMessage}
             events={events}
             isSessionActive={isSessionActive}
           />
-        </section>
-      </main>
-    </>
+        </div>
+      </div>
+    </div>
   );
 }
