@@ -1,7 +1,10 @@
 import { useState } from "react";
 import { CloudLightning, CloudOff, MessageSquare } from "react-feather";
+import { Mic } from "lucide-react";
+import { MicOff } from "lucide-react";
 import Button from "./Button";
 
+//UI when session is inactive (User have not clicked on "Start Speaking")
 function SessionStopped({ startSession }) {
   const [isActivating, setIsActivating] = useState(false);
 
@@ -16,22 +19,33 @@ function SessionStopped({ startSession }) {
     <div className="flex items-center justify-center w-full h-full">
       <Button
         onClick={handleStartSession}
-        className={isActivating ? "bg-gray-100" : "bg-green-600"}
-        // icon={<CloudLightning height={16} />}
+        className={`flex items-center gap-2 px-6 py-3 rounded-full font-semibold text-white shadow-md transition-all ${
+          isActivating
+            ? "bg-gray-400 cursor-not-allowed"
+            : "bg-gray-800 hover:bg-gray-900 active:scale-95"
+        }`}
       >
-        {isActivating ? "Starting session..." : "Start Speaking"}
+        <Mic className="w-5 h-5" />
+        {isActivating ? "Starting..." : "Start Speaking"}
       </Button>
     </div>
+
   );
 }
 
+//UI to change to when session is active (User clicked on "Start Speaking")
 function SessionActive({ stopSession }) {
   return (
-    <div className="flex items-center justify-center  w-full h-full">
-      <Button className="bg-red-600" onClick={stopSession} icon={<CloudOff height={16} />}>
-        disconnect
+    <div className="flex items-center justify-center w-full h-full">
+      <Button
+        onClick={stopSession}
+        className="flex items-center gap-2 px-6 py-3 rounded-full font-semibold text-white bg-[#97463C] hover:bg-[#843f35] active:scale-95 shadow-md transition-all"
+      >
+        <MicOff className="w-5 h-5" />
+        Disconnect
       </Button>
     </div>
+
   );
 }
 

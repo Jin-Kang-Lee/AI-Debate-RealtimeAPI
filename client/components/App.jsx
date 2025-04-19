@@ -1,40 +1,75 @@
 import { useEffect, useRef, useState } from "react";
 import logo from "/assets/openai-logomark.svg";
 import EventLog from "./EventLog";
+import { AudioLines, Bot } from "lucide-react";
+import { Mic } from "lucide-react";
 import SessionControls from "./SessionControls";
+import Lottie from "lottie-react";
+import Avatar from "./Avatar";
+import idleAvatar from "../assets/Avatar.png";
 
 export default function App() {
   const [isSessionActive, setIsSessionActive] = useState(false);
   const [events, setEvents] = useState([]);
   const [dataChannel, setDataChannel] = useState(null);
-  const [topic, setTopic] = useState("AI in healthcare"); //State variable for the Debate Topic drop down box
-  const [stance, setStance] = useState("for"); //State variable for the Stance drop down box
+  const [topic, setTopic] = useState("AI in healthcare");
+  const [stance, setStance] = useState("for");
   const peerConnection = useRef(null);
   const audioElement = useRef(null);
-  const [aiResponse, setAiResponse] = useState(""); // Live transcript for AI
+  const [aiResponse, setAiResponse] = useState("");
+  const [audioStream, setAudioStream] = useState(null);
+  const [aiIsTalking, setAiIsTalking] = useState(false);
 
+  function triggerAIResponseWithDelay(delayMs = 2000) {
+    const triggerResponse = {
+      type: "response.create",
+      response: {
+        conversation: "none",
+      },
+    };
+
+    setTimeout(() => {
+      sendClientEvent(triggerResponse, dataChannel);
+    }, delayMs);
+  }
 
   async function startSession() {
     const tokenResponse = await fetch("/token");
     const data = await tokenResponse.json();
     const EPHEMERAL_KEY = data.client_secret.value;
-  
+
     const pc = new RTCPeerConnection();
     audioElement.current = document.createElement("audio");
     audioElement.current.autoplay = true;
-    pc.ontrack = (e) => (audioElement.current.srcObject = e.streams[0]);
-  
+
+    pc.ontrack = (e) => {
+      const [remoteStream] = e.streams;
+      audioElement.current.srcObject = remoteStream;
+      const aiOnlyStream = new MediaStream();
+      e.streams[0].getAudioTracks().forEach(track => {
+        if (track.kind === "audio") {
+          aiOnlyStream.addTrack(track);
+        }
+      });
+      console.log("✅ AI Audio Tracks Set:", aiOnlyStream.getAudioTracks());
+      setAudioStream(aiOnlyStream);
+    };
+
     const ms = await navigator.mediaDevices.getUserMedia({ audio: true });
     pc.addTrack(ms.getTracks()[0]);
-  
+
     const dc = pc.createDataChannel("oai-events");
-  
+
     dc.addEventListener("open", () => {
       setIsSessionActive(true);
-      setDataChannel(dc); // still keep state update for future use
-    
-      //Prompt for the AI
-      const introMessage = {
+      setDataChannel(dc);
+
+      const prompt = `You're a witty, sharp-tongued college debater taking part in a spirited debate on the topic: "${topic}". 
+      I will argue ${ stance === "for" ? "FOR" : "AGAINST" } the motion, so you must take the OPPOSITE stance. 
+      Respond like a smart, confident student who loves intellectual back-and-forth. Be clever, quick on your feet, and use humor or sarcasm when it fits. 
+      Keep each response to 2-3 sentences. Don't explain everything at once—make it a fun, punchy exchange. Only respond in English.`;
+
+      const userMessage = {
         type: "conversation.item.create",
         item: {
           type: "message",
@@ -42,47 +77,47 @@ export default function App() {
           content: [
             {
               type: "input_text",
-              text: `Let's begin a debate on the topic: "${topic}". I will argue ${
-                stance === "for" ? "FOR" : "AGAINST"
-              } the motion. You must take the opposing view. Respond concisely (2-3 sentences).`,
+              text: prompt,
             },
           ],
         },
       };
-    
+
       setTimeout(() => {
-        sendClientEvent(introMessage, dc); // use local dc
-        // sendClientEvent({ type: "response.create" }, dc); // use local dc
-      }, 300);
+        sendClientEvent(userMessage, dc);
+        triggerAIResponseWithDelay(3000); // Wait 3 seconds before AI responds
+      }, 2000); // Delay initial message slightly as well
     });
-    
-  
+
     dc.addEventListener("message", (e) => {
       const event = JSON.parse(e.data);
-    
-      // Capture delta updates
+
       if (event.type === "response.delta") {
         const textDelta = event.delta?.content?.[0]?.text;
         if (textDelta) {
-          setAiResponse(prev => prev + textDelta);
+          setAiResponse((prev) => prev + textDelta);
+
+          setTimeout(() => {
+            setAiIsTalking(true);
+          }, 300);
         }
       }
-    
-      // Clear after final response
+
       if (event.type === "response.done") {
-        setAiResponse(""); // Reset for the next message
+        setAiIsTalking(false);
+        setAiResponse("");
       }
-    
+
       if (!event.timestamp) {
         event.timestamp = new Date().toLocaleTimeString();
       }
+
       setEvents((prev) => [event, ...prev]);
     });
-    
-  
+
     const offer = await pc.createOffer();
     await pc.setLocalDescription(offer);
-  
+
     const sdpResponse = await fetch(`https://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-12-17`, {
       method: "POST",
       body: offer.sdp,
@@ -91,10 +126,10 @@ export default function App() {
         "Content-Type": "application/sdp",
       },
     });
-  
+
     const answer = { type: "answer", sdp: await sdpResponse.text() };
     await pc.setRemoteDescription(answer);
-  
+
     peerConnection.current = pc;
   }
 
@@ -119,69 +154,90 @@ export default function App() {
       console.error("Failed to send message - no data channel available", message);
     }
   }
-  
-
-  function sendTextMessage(message) {
-    const event = {
-      type: "conversation.item.create",
-      item: {
-        type: "message",
-        role: "user",
-        content: [{ type: "input_text", text: message }],
-      },
-    };
-    sendClientEvent(event);
-    sendClientEvent({ type: "response.create" });
-  }
 
   return (
-    <div className="bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900 text-white min-h-screen flex items-center justify-center p-4">
-      <div className="max-w-2xl w-full bg-gray-800 rounded-2xl shadow-2xl p-6 space-y-6">
-        <div className="text-center border-b border-gray-700 pb-4">
-          <h1 className="text-4xl font-extrabold text-white">AI Debator</h1>
-        </div>
+    <div className="bg-[#FFECDB] text-white min-h-screen flex items-center justify-center p-4 ">
+      <div className="flex w-full max-w-7xl gap-8 -translate-x-8">
+        {/* LEFT PANEL */}
+        <div className="flex-1 bg-[#EC6A39] rounded-2xl shadow-2xl p-6 space-y-6" style={{ transform: "scale(1)" }}>
 
-        <div className="space-y-4">
-          <div>
-            <label className="block text-sm text-gray-300 mb-1">Debate Topic</label>
-            <select
-              className="w-full rounded-md p-2 text-black"
-              value={topic}
-              onChange={(e) => setTopic(e.target.value)}
-            >
-              <option value="AI in healthcare">Allowing AI to override human decisions in healthcare will lead to better patient outcome</option>
-              <option value="Social media's impact on society">Social media's impact on society</option>
-              <option value="Climate change action urgency">Climate change action urgency</option>
-            </select>
+          <div className="text-center pb-4">
+            <div className="flex justify-center items-center gap-2 mb-2">
+              <div className="bg-gray-800 p-2 rounded-full">
+                <Bot className="text-white w-6 h-6" />
+              </div>
+              <h1 className="text-4xl font-extrabold text-white">AI Debator</h1>
+            </div>
+            <p className="text-sm text-white">Engage in a formal debate with AI</p>
           </div>
-          <div>
-            <label className="block text-sm text-gray-300 mb-1">Your Stance</label>
-            <select
-              className="w-full rounded-md p-2 text-black"
-              value={stance}
-              onChange={(e) => setStance(e.target.value)}
-            >
-              <option value="for">For the motion</option>
-              <option value="against">Against the motion</option>
-            </select>
+
+          <div className="space-y-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm text-white mb-1">Debate Topic</label>
+                <select
+                  className="w-full rounded-lg px-4 py-2 bg-[#FFE8D0] text-[#2B2B2B] border border-[#E0B28A] focus:outline-none focus:ring"
+
+                  value={topic}
+                  onChange={(e) => setTopic(e.target.value)}
+                >
+                  <option value="AI in healthcare">Allowing AI to override human decisions in healthcare</option>
+                  <option value="Social media's impact on society">Social media's impact on society</option>
+                  <option value="Climate change action urgency">Climate change action urgency</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm text-white mb-1">Your Stance</label>
+                <select
+                  className="w-full rounded-lg px-4 py-2 bg-[#FFE8D0] text-[#2B2B2B] border border-[#E0B28A] focus:outline-none focus:ring"
+
+                  value={stance}
+                  onChange={(e) => setStance(e.target.value)}
+                >
+                  <option value="for">For the motion</option>
+                  <option value="against">Against the motion</option>
+                </select>
+              </div>
+            </div>
+
+            <div className="bg-[#FFE8D0] text-[#2B2B2B] border border-[#E0B28A] p-4 rounded-lg flex items-center gap-4 shadow-inner">
+              <div className="flex-shrink-0">
+                <div className="bg-gray-800 p-2 rounded-full">
+                  <AudioLines className="text-white w-6 h-6" />
+                </div>
+              </div>
+              <div className="flex flex-col justify-center text-center w-full">
+                <p className="text-black text-sm leading-relaxed">
+                  {aiResponse || "Click 'Start Speaking' to begin the debate..."}
+                </p>
+              </div>
+            </div>
+
+            <div className="pt-4">
+              <SessionControls
+                startSession={startSession}
+                stopSession={stopSession}
+                sendClientEvent={sendClientEvent}
+                isSessionActive={isSessionActive}
+              />
+            </div>
           </div>
         </div>
 
-        <div className="bg-gray-700 p-4 rounded-md min-h-[80px]">
-          <h2 className="text-lg font-semibold mb-2">AI Response:</h2>
-          <p className="text-white">{aiResponse || "Click start speaking"}</p>
-        </div>
-
-
-        <div className="pt-4">
-          <SessionControls
-            startSession={startSession}
-            stopSession={stopSession}
-            sendClientEvent={sendClientEvent}
-            sendTextMessage={sendTextMessage}
-            events={events}
-            isSessionActive={isSessionActive}
-          />
+        {/* RIGHT PANEL */}
+        <div className="w-1/3 flex justify-center items-center -mt-12 " style={{ transform: "scale(1.6)" }}>
+          {!isSessionActive ? (
+            <img
+              src={idleAvatar}
+              alt="Idle Avatar"
+              className="w-72 h-72 object-contain opacity-50 transition duration-500"
+            />
+          ) : (
+            <Avatar
+              audioSource={audioStream}
+              isSessionActive={isSessionActive}
+            />
+          )}
         </div>
       </div>
     </div>
