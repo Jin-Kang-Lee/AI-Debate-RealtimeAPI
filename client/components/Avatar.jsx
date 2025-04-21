@@ -8,6 +8,8 @@ export default function Avatar({ audioSource, isSessionActive }) {
   const animationFrameRef = useRef(null);
   const [isTalking, setIsTalking] = useState(false);
 
+  //This useEffect sets up a Web Audio API analyser that checks the volume levels in the AI's audio stream to detect if the AI is speaking. 
+  //It updates state accordingly.
   useEffect(() => {
     if (!audioSource || !isSessionActive) return;
 
@@ -38,6 +40,7 @@ export default function Avatar({ audioSource, isSessionActive }) {
     };
   }, [audioSource, isSessionActive]);
 
+  //This useEffect plays or stops the Lottie animation depending on the isTalking state.
   useEffect(() => {
     if (!lottieRef.current) return;
     isTalking ? lottieRef.current.play() : lottieRef.current.stop();

@@ -9,17 +9,18 @@ import Avatar from "./Avatar";
 import idleAvatar from "../assets/Avatar.png";
 
 export default function App() {
-  const [isSessionActive, setIsSessionActive] = useState(false);
-  const [events, setEvents] = useState([]);
-  const [dataChannel, setDataChannel] = useState(null);
-  const [topic, setTopic] = useState("AI in healthcare");
-  const [stance, setStance] = useState("for");
-  const peerConnection = useRef(null);
-  const audioElement = useRef(null);
-  const [aiResponse, setAiResponse] = useState("");
-  const [audioStream, setAudioStream] = useState(null);
-  const [aiIsTalking, setAiIsTalking] = useState(false);
+  const [isSessionActive, setIsSessionActive] = useState(false); //Check if session is active
+  const [events, setEvents] = useState([]); //Stores a list of events that is exchanged with AI
+  const [dataChannel, setDataChannel] = useState(null); //Stores the WebRTC data channel used for text message exchange
+  const [topic, setTopic] = useState("AI in healthcare"); //Selected debate topic
+  const [stance, setStance] = useState("for"); //Selected stance
+  const peerConnection = useRef(null); //WebRTC connection instance reference
+  const audioElement = useRef(null); //HTML audio element reference for playing AI audio
+  const [aiResponse, setAiResponse] = useState(""); //State to store the AI's response text
+  const [audioStream, setAudioStream] = useState(null); //MediaStream used to play only the AI audio
+  const [aiIsTalking, setAiIsTalking] = useState(false); //Tracks if AI is currently speaking (used for avatar animation)
 
+  //Delays the AI's reply after a prompt is sent to simulate more natural conversation timing
   function triggerAIResponseWithDelay(delayMs = 2000) {
     const triggerResponse = {
       type: "response.create",
@@ -33,6 +34,7 @@ export default function App() {
     }, delayMs);
   }
 
+  //Starts the AI debate session, sets up WebRTC and handles message flow
   async function startSession() {
     const tokenResponse = await fetch("/token");
     const data = await tokenResponse.json();
@@ -60,6 +62,7 @@ export default function App() {
 
     const dc = pc.createDataChannel("oai-events");
 
+    //Handle data channel open: send debate prompt and trigger AI reply
     dc.addEventListener("open", () => {
       setIsSessionActive(true);
       setDataChannel(dc);
@@ -89,6 +92,7 @@ export default function App() {
       }, 2000); // Delay initial message slightly as well
     });
 
+    //Handle incoming messages from AI
     dc.addEventListener("message", (e) => {
       const event = JSON.parse(e.data);
 
@@ -133,6 +137,7 @@ export default function App() {
     peerConnection.current = pc;
   }
 
+  //Ends the debate session, cleans up media and WebRTC connection
   function stopSession() {
     if (dataChannel) dataChannel.close();
     peerConnection.current?.getSenders().forEach((s) => s.track?.stop());
@@ -142,6 +147,7 @@ export default function App() {
     peerConnection.current = null;
   }
 
+  //Sends a structured message over the data channel to the AI
   function sendClientEvent(message, channelOverride = null) {
     const channel = channelOverride || dataChannel;
     if (channel) {
