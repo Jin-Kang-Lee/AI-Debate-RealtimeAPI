@@ -28,13 +28,20 @@ export default function App() {
         conversation: "none",
       },
     };
-
+  
     setTimeout(() => {
+      // Ensure the data channel is ready
+      if (!dataChannel || dataChannel.readyState !== "open") {
+        console.error("⛔ Data channel is not open yet, cannot send trigger response.");
+        return;
+      }
+  
       sendClientEvent(triggerResponse, dataChannel);
     }, delayMs);
   }
 
   //Starts the AI debate session, sets up WebRTC and handles message flow
+  //Initializes full WebRTC Connection
   async function startSession() {
     const tokenResponse = await fetch("/token");
     const data = await tokenResponse.json();
@@ -67,6 +74,7 @@ export default function App() {
       setIsSessionActive(true);
       setDataChannel(dc);
 
+      //Custom prompt --> Can be changed anytime
       const prompt = `You're a witty, sharp-tongued college debater taking part in a spirited debate on the topic: "${topic}". 
       I will argue ${ stance === "for" ? "FOR" : "AGAINST" } the motion, so you must take the OPPOSITE stance. 
       Respond like a smart, confident student who loves intellectual back-and-forth. Be clever, quick on your feet, and use humor or sarcasm when it fits. 
@@ -138,6 +146,8 @@ export default function App() {
   }
 
   //Ends the debate session, cleans up media and WebRTC connection
+  //Function safely closes the data channel, resetting the session state
+  //Ensures proper resource cleanup to avoid any memory leaks or dangling streams
   function stopSession() {
     if (dataChannel) dataChannel.close();
     peerConnection.current?.getSenders().forEach((s) => s.track?.stop());
@@ -147,7 +157,7 @@ export default function App() {
     peerConnection.current = null;
   }
 
-  //Sends a structured message over the data channel to the AI
+  //Sends a structured message over the active data channel to the AI
   function sendClientEvent(message, channelOverride = null) {
     const channel = channelOverride || dataChannel;
     if (channel) {

@@ -3,13 +3,13 @@ import Lottie from "lottie-react";
 import animationData from "../assets/lottie-Avatar.json";
 
 export default function Avatar({ audioSource, isSessionActive }) {
-  const lottieRef = useRef();
-  const analyserRef = useRef(null);
-  const animationFrameRef = useRef(null);
-  const [isTalking, setIsTalking] = useState(false);
+  const lottieRef = useRef(); //Lottie animation instance
+  const analyserRef = useRef(null); //Store web audio analyzer node
+  const animationFrameRef = useRef(null); //Track the animation frame ID for cleanup
+  const [isTalking, setIsTalking] = useState(false); //State to determine if avatar should be animated or not (AI is talking or not)
 
-  //This useEffect sets up a Web Audio API analyser that checks the volume levels in the AI's audio stream to detect if the AI is speaking. 
-  //It updates state accordingly.
+  //This useEffect sets up a Web Audio API analyser that checks the volume levels in the AI's audio stream to detect if the AI is speaking
+  //It updates state accordingly
   useEffect(() => {
     if (!audioSource || !isSessionActive) return;
 
@@ -23,6 +23,7 @@ export default function Avatar({ audioSource, isSessionActive }) {
 
     source.connect(analyser);
 
+    //Continuously analyze the volume level and update isTalking
     const updateVolume = () => {
       analyser.getByteFrequencyData(dataArray);
       const avg = dataArray.reduce((a, b) => a + b, 0) / dataArray.length;
@@ -31,8 +32,9 @@ export default function Avatar({ audioSource, isSessionActive }) {
       animationFrameRef.current = requestAnimationFrame(updateVolume);
     };
 
-    updateVolume();
+    updateVolume(); //Call to start monitoring
 
+    //return to cleanup component
     return () => {
       cancelAnimationFrame(animationFrameRef.current);
       analyser.disconnect();
@@ -40,7 +42,8 @@ export default function Avatar({ audioSource, isSessionActive }) {
     };
   }, [audioSource, isSessionActive]);
 
-  //This useEffect plays or stops the Lottie animation depending on the isTalking state.
+
+  //This useEffect plays or stops the Lottie animation depending on the isTalking state (If AI is talking or not)
   useEffect(() => {
     if (!lottieRef.current) return;
     isTalking ? lottieRef.current.play() : lottieRef.current.stop();

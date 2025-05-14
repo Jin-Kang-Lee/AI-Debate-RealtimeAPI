@@ -6,13 +6,14 @@ import Button from "./Button";
 
 //UI when session is inactive (User have not clicked on "Start Speaking")
 function SessionStopped({ startSession }) {
-  const [isActivating, setIsActivating] = useState(false);
+  const [isActivating, setIsActivating] = useState(false); //Flag to disable the button after user click to prevent multiple activations
 
+  //Handles the "Start Speaking" Button click
   function handleStartSession() {
     if (isActivating) return;
 
-    setIsActivating(true);
-    startSession();
+    setIsActivating(true); //Shows the loading state
+    startSession(); //Trigger the startSession event which is passed from parent
   }
 
   return (
@@ -50,6 +51,7 @@ function SessionActive({ stopSession }) {
 }
 
 
+//Switches between active and inactive sessions for the UI
 export default function SessionControls({
   startSession,
   stopSession,
